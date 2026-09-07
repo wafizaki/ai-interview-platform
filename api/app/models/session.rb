@@ -22,6 +22,8 @@ class Session < ApplicationRecord
   scope :ended,              -> { where(status: 'ended') }
   scope :retention_expired,   ->(days = 30) { where('created_at <= ? AND anonymized_at IS NULL', days.days.ago) }
 
+  alias_attribute :data_purged_at, :anonymized_at
+
   def active?     = status == 'active'
   def ended?      = status == 'ended'
   def pending?    = status == 'pending'

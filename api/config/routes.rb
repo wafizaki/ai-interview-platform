@@ -52,6 +52,15 @@ Rails.application.routes.draw do
       # Vacancies
       resources :vacancies
 
+      # Admin endpoints (Right to Erasure / Biometrics Purge)
+      namespace :admin do
+        resources :candidates, only: [] do
+          member do
+            delete :biometrics, action: :purge_biometrics
+          end
+        end
+      end
+
       # Portfolios — fit/gap and export
       resources :portfolios, only: [] do
         member do

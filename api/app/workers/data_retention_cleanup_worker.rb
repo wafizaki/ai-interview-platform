@@ -5,9 +5,13 @@ class DataRetentionCleanupWorker
 
   sidekiq_options queue: :default, retry: 3
 
+  def self.perform_now(*args, **kwargs)
+    new.perform(*args, **kwargs)
+  end
+
   # If session_id is provided, performs on-demand purge for that specific session (e.g. Right to Erasure request).
   # If session_id is nil, performs batch purge for all sessions older than retention days (e.g. 30 days).
-  def perform(session_id = nil, days = 30)
+  def perform(session_id = nil, days: 30)
     if session_id.present?
       session = Session.unscoped.find_by(id: session_id)
       if session
@@ -23,3 +27,6 @@ class DataRetentionCleanupWorker
     end
   end
 end
+
+# Alias for ActiveJob / Job convention compatibility
+DataRetentionPurgeJob = DataRetentionCleanupWorker
