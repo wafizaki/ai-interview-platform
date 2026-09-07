@@ -28,6 +28,7 @@ import { useAudioPlayback } from "@/hooks/useAudioPlayback";
 import { useAudioWebSocket } from "@/hooks/useAudioWebSocket";
 import { sessionsApi } from "@/services/sessions";
 import HardwareCheck from "@/components/HardwareCheck";
+import { ConsentModal } from "@/components/interview/ConsentModal";
 import { CheckCircle, Mic, MicOff, Volume2 } from "lucide-react";
 import type { CandidateInfo, InterviewState, InterviewSpeaker, TranscriptTurn } from "@/types";
 
@@ -36,6 +37,7 @@ export default function InterviewPage() {
   const [candidateInfo, setCandidateInfo] = useState<CandidateInfo | null>(null);
   const [sessionId, setSessionId] = useState<number | null>(null);
   const [interviewState, setInterviewState] = useState<InterviewState>("idle");
+  const [hasGivenConsent, setHasGivenConsent] = useState(false);
   const [speaker, setSpeaker] = useState<InterviewSpeaker>(null);
   const [transcript, setTranscript] = useState<Pick<TranscriptTurn, "speaker" | "text">[]>([]);
   const [hardwareCheckDone, setHardwareCheckDone] = useState(false); // kept for green banner
@@ -119,7 +121,14 @@ export default function InterviewPage() {
     setTranscript((prev) => [...prev.slice(-9), turn]); // keep last 10
   }, []);
 
-  const { playChunk, stop: stopPlayback, scheduleAfterPlayback, waitForDrain, cancelDrain } = useAudioPlayback();
+  const {
+    playChunk,
+    stop: stopPlayback,
+    scheduleAfterPlayback,
+    waitForDrain,
+    cancelDrain,
+    resumeAudioContext,
+  } = useAudioPlayback();
   const audioCompleteCalledRef = useRef(false);
   const audioCompleteSafetyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -182,6 +191,29 @@ export default function InterviewPage() {
     await switchDevice(newDeviceId);
   }, [switchDevice]);
 
+  // Listen for device changes (e.g. candidate disconnects Bluetooth headset during interview)
+  useEffect(() => {
+    const handleDeviceListChange = async () => {
+      const inputs = await loadAudioDevices();
+      if (inputs.length > 0 && selectedMicId) {
+        const stillExists = inputs.some((d) => d.deviceId === selectedMicId);
+        if (!stillExists) {
+          // Device lost: seamlessly fall back to first available audio input
+          const fallbackMic = inputs[0].deviceId;
+          setSelectedMicId(fallbackMic);
+          if (interviewState === "active" || interviewState === "connecting") {
+            await switchDevice(fallbackMic);
+          }
+        }
+      }
+    };
+
+    navigator.mediaDevices.addEventListener("devicechange", handleDeviceListChange);
+    return () => {
+      navigator.mediaDevices.removeEventListener("devicechange", handleDeviceListChange);
+    };
+  }, [loadAudioDevices, selectedMicId, interviewState, switchDevice]);
+
   const toggleMic = useCallback(() => {
     if (micMutedRef.current) {
       micMutedRef.current = false;
@@ -194,8 +226,22 @@ export default function InterviewPage() {
     }
   }, [mute, unmute]);
 
+  const handleConsent = useCallback(async () => {
+    try {
+      await resumeAudioContext();
+    } catch (e) {
+      console.warn("[InterviewPage] Failed to resume AudioContext during consent gesture:", e);
+    }
+    setHasGivenConsent(true);
+  }, [resumeAudioContext]);
+
   const startInterview = useCallback(async (micId?: string) => {
     if (!sessionId) return;
+    try {
+      await resumeAudioContext();
+    } catch (e) {
+      console.warn("[InterviewPage] Failed to resume AudioContext during startInterview:", e);
+    }
     const targetMicId = micId || selectedMicId;
     if (targetMicId) setSelectedMicId(targetMicId);
     setInterviewState("connecting");
@@ -205,7 +251,7 @@ export default function InterviewPage() {
     // This prevents mic audio from being sent during AI speech, since separate
     // AudioContexts for capture/playback break the browser's echo cancellation.
     muteRef.current?.();
-  }, [sessionId, connect, startCapture, selectedMicId]);
+  }, [sessionId, connect, startCapture, selectedMicId, resumeAudioContext]);
 
   const endInterview = useCallback(async () => {
     setInterviewState("ending");
@@ -237,33 +283,43 @@ export default function InterviewPage() {
           )}
         </div>
 
-        {!hardwareCheckDone ? (
-          <div className="space-y-4">
-            <div className="bg-muted/50 rounded-lg p-4 text-sm space-y-1.5 text-muted-foreground">
-              <p>• This is a voice interview. Make sure you're in a quiet place.</p>
-              <p>• The AI will ask follow-up questions — there are no scripts.</p>
-              <p>• The session will last up to {candidateInfo?.time_limit_min ?? "—"} minutes.</p>
-              <p>• Your mic will be active throughout. You can end anytime.</p>
+        {/* Explicit Privacy & Data Processing Consent Modal */}
+        {!hasGivenConsent && (
+          <ConsentModal
+            roleTitle={candidateInfo?.role_title}
+            onConsent={handleConsent}
+          />
+        )}
+
+        {hasGivenConsent && (
+          !hardwareCheckDone ? (
+            <div className="space-y-4">
+              <div className="bg-muted/50 rounded-lg p-4 text-sm space-y-1.5 text-muted-foreground">
+                <p>• This is a voice interview. Make sure you're in a quiet place.</p>
+                <p>• The AI will ask follow-up questions — there are no scripts.</p>
+                <p>• The session will last up to {candidateInfo?.time_limit_min ?? "—"} minutes.</p>
+                <p>• Your mic will be active throughout. You can end anytime.</p>
+              </div>
+              <HardwareCheck
+                onStart={(micId) => {
+                  setSelectedMicId(micId);
+                  setHardwareCheckDone(true);
+                  startInterview(micId);
+                }}
+              />
             </div>
-            <HardwareCheck
-              onStart={(micId) => {
-                setSelectedMicId(micId);
-                setHardwareCheckDone(true);
-                startInterview(micId);
-              }}
-            />
-          </div>
-        ) : (
-          <div className="space-y-4">
-            <div className="flex items-center gap-2 text-sm text-green-700 bg-green-50 border border-green-200 rounded-lg px-4 py-2.5">
-              <CheckCircle className="h-4 w-4 shrink-0" />
-              <span>Hardware checks passed. You're ready to start.</span>
+          ) : (
+            <div className="space-y-4">
+              <div className="flex items-center gap-2 text-sm text-green-700 bg-green-50 border border-green-200 rounded-lg px-4 py-2.5">
+                <CheckCircle className="h-4 w-4 shrink-0" />
+                <span>Hardware checks passed. You're ready to start.</span>
+              </div>
+              <Button className="w-full" size="lg" onClick={() => startInterview(selectedMicId)}>
+                <Mic className="h-4 w-4 mr-2" />
+                Start Interview
+              </Button>
             </div>
-            <Button className="w-full" size="lg" onClick={() => startInterview(selectedMicId)}>
-              <Mic className="h-4 w-4 mr-2" />
-              Start Interview
-            </Button>
-          </div>
+          )
         )}
       </div>
     );

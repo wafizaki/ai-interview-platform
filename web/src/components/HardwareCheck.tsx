@@ -109,6 +109,24 @@ const HardwareCheck: React.FC<HardwareCheckProps> = ({ onStart }) => {
     };
   }, []);
 
+  // Listen for device changes (e.g. Bluetooth headset connected/disconnected)
+  useEffect(() => {
+    const handleDeviceChange = async () => {
+      const inputs = await loadAudioDevices();
+      if (inputs.length > 0 && selectedMicId) {
+        const stillExists = inputs.some((d) => d.deviceId === selectedMicId);
+        if (!stillExists) {
+          handleMicChange(inputs[0].deviceId);
+        }
+      }
+    };
+
+    navigator.mediaDevices.addEventListener("devicechange", handleDeviceChange);
+    return () => {
+      navigator.mediaDevices.removeEventListener("devicechange", handleDeviceChange);
+    };
+  }, [selectedMicId]);
+
   const checkAudioPlayback = async (): Promise<boolean> => {
     try {
       const AudioCtx =

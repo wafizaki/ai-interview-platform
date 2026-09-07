@@ -55,6 +55,9 @@ export function useAudioCapture({ onFrame, onError }: UseAudioCaptureOptions) {
 
       const ctx = new AudioContext({ sampleRate: 16000 });
       audioCtxRef.current = ctx;
+      if (ctx.state === "suspended") {
+        await ctx.resume().catch(() => {});
+      }
 
       await ctx.audioWorklet.addModule("/audio-worklet-processor.js");
 
@@ -89,6 +92,9 @@ export function useAudioCapture({ onFrame, onError }: UseAudioCaptureOptions) {
   const switchDevice = useCallback(async (deviceId: string) => {
     if (!audioCtxRef.current || !workletNodeRef.current) return;
     try {
+      if (audioCtxRef.current.state === "suspended") {
+        await audioCtxRef.current.resume().catch(() => {});
+      }
       streamRef.current?.getTracks().forEach((t) => t.stop());
       sourceNodeRef.current?.disconnect();
 
