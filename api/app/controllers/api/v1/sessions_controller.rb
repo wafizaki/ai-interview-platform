@@ -6,7 +6,7 @@ module Api
       authorize_auth_token! :assessor, except: %i[candidate_info record_consent audio_complete]
       skip_before_action :require_tenant!, only: %i[candidate_info record_consent audio_complete]
 
-      before_action :set_session, only: %i[show end_session coverage transcript]
+      before_action :set_session, only: %i[show end_session purge_data coverage transcript]
 
       # GET /api/v1/assessments/:assessment_id/sessions
       def index
@@ -75,6 +75,18 @@ module Api
         else
           json_error("Failed to end session", :unprocessable_entity)
         end
+      end
+
+      # POST /api/v1/sessions/:id/purge_data (Right to Erasure / DPO On-Demand)
+      def purge_data
+        Sessions::DataRetentionPurger.new(@session).call
+        json_response(
+          success: true,
+          message: "Candidate transcripts and personal data have been permanently purged",
+          session: session_json(@session.reload)
+        )
+      rescue StandardError => e
+        json_error("Failed to purge session data: #{e.message}", :unprocessable_entity)
       end
 
       # GET /api/v1/sessions/:id/coverage
@@ -209,7 +221,8 @@ module Api
           duration_seconds: session.duration_seconds,
           created_at:       session.created_at,
           consented_at:     session.consented_at,
-          consent_version:  session.consent_version
+          consent_version:  session.consent_version,
+          anonymized_at:    session.anonymized_at
         }
       end
 

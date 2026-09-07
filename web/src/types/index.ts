@@ -47,6 +47,7 @@ export interface Session {
   created_at?: string;
   consented_at?: string;
   consent_version?: string;
+  anonymized_at?: string;
 }
 
 export interface CoverageSkill {
