@@ -57,6 +57,9 @@ export default function InterviewPage() {
       .then((res) => {
         setCandidateInfo(res.data);
         setSessionId(res.data.session_id);
+        if (res.data.has_consented) {
+          setHasGivenConsent(true);
+        }
         if (res.data.session_status === "ended") setInterviewState("complete");
       })
       .catch(() => setInterviewState("complete"));
@@ -232,8 +235,15 @@ export default function InterviewPage() {
     } catch (e) {
       console.warn("[InterviewPage] Failed to resume AudioContext during consent gesture:", e);
     }
+    if (token) {
+      try {
+        await sessionsApi.recordConsent(token, "v1.0");
+      } catch (e) {
+        console.warn("[InterviewPage] Failed to record consent on backend:", e);
+      }
+    }
     setHasGivenConsent(true);
-  }, [resumeAudioContext]);
+  }, [resumeAudioContext, token]);
 
   const startInterview = useCallback(async (micId?: string) => {
     if (!sessionId) return;
